@@ -76,18 +76,8 @@ soon
 ## ▶ Running
 
 ```bash
-sudo ./start.sh alpine
+bash start.sh --start alpine
 ```
-
----
-
-## 🛑 Stop
-
-```bash
-sudo ./stop.sh alpine
-```
-
----
 
 ## 📖 Notes
 
