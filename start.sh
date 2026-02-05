@@ -1,12 +1,7 @@
 #!/system/bin/sh
 # =========================================
-# Linux Chroot Manager v6.0.4
-# Multi-distro support: Alpine & Ubuntu
-# - Termux key bindings fix
-# - Persistent zsh history
-# - Oh-My-Zsh integration
-# - Color-coded messages
-# - Android group IDs
+# Linux Chroot Manager v6.0.6
+# Multi-distro support: Alpine, Ubuntu, Debian, ArchLinux
 # =========================================
 
 # ---------------------------
@@ -44,11 +39,11 @@ print_message() {
 SCRIPT_VERSION="6.0.4"
 
 # Alpine versions
-ALPINE_VERSION="3.23.3"
-ALPINE_BRANCH="v3.23"
+ALPINE_VERSION="3.21.3"
+ALPINE_BRANCH="v3.21"
 
 # Ubuntu versions (use full version number from cdimage)
-UBUNTU_VERSION="24.04.3"  # Check https://cdimage.ubuntu.com/ubuntu-base/releases/
+UBUNTU_VERSION="24.04.1"  # Check https://cdimage.ubuntu.com/ubuntu-base/releases/
 UBUNTU_CODENAME="noble"   # noble=24.04, jammy=22.04, focal=20.04
 
 # Debian versions (from proot-distro)
@@ -141,11 +136,11 @@ check_root_commands() {
         echo "╠════════════════════════════════════════════════════╣"
         echo "║  This script requires root access via 'su'.       ║"
         echo "║                                                    ║"
-        echo "║  For Termux users:                                 ║"
-        echo "║    1. Install tsu: pkg install tsu                 ║"
-        echo "║    2. Ensure device is rooted (Magisk)             ║"
+        echo "║  Requirements:                                     ║"
+        echo "║    - Rooted Android device (Magisk recommended)    ║"
+        echo "║    - Grant root permission when prompted           ║"
         echo "║                                                    ║"
-        echo "║  Then run this script again (no sudo needed):      ║"
+        echo "║  Then run this script again:                       ║"
         echo "║    bash start.sh --install alpine                  ║"
         echo "╚════════════════════════════════════════════════════╝"
         echo ""
@@ -218,7 +213,6 @@ print_info_box() {
 
 cleanup_mounts() {
     local base="$1"
-    echo "[*] un-mounting partition"
     $ROOT_SU "umount -l $base/mnt/workspace 2>/dev/null || true"
     $ROOT_SU "umount -l $base/mnt/sdcard 2>/dev/null || true"
     $ROOT_SU "umount -l $base/dev/pts 2>/dev/null || true"
@@ -412,19 +406,6 @@ install_ubuntu() {
     $ROOT_SU "mount --rbind /dev $base/dev 2>/dev/null || true"
     $ROOT_SU "mount -t devpts devpts $base/dev/pts 2>/dev/null || true"
     
-    # Check if sources.list exists, if not create basic one
-    echo "[*] Checking APT configuration..."
-    chroot_exec "$base" "if [ ! -f /etc/apt/sources.list ] || [ ! -s /etc/apt/sources.list ]; then
-        echo 'Creating APT sources.list...'
-        cat > /etc/apt/sources.list << 'EOFAPT'
-deb http://ports.ubuntu.com/ ${UBUNTU_CODENAME} main restricted universe multiverse
-deb http://ports.ubuntu.com/ ${UBUNTU_CODENAME}-updates main restricted universe multiverse
-deb http://ports.ubuntu.com/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
-EOFAPT
-    else
-        echo 'APT sources.list already exists, keeping default'
-    fi"
-    
     echo "[*] Updating package lists..."
     chroot_exec "$base" "apt-get update"
     
@@ -460,7 +441,8 @@ EOF"
 # ---------------------------
 install_debian() {
     local base="${BASE_ROOT}/debian"
-    local debian_arch=$(get_ubuntu_arch)  # Debian uses same arch naming as Ubuntu
+    # Debian uses same arch naming as proot-distro: aarch64, x86_64, i686, arm
+    local debian_arch=$(echo "$ARCH" | sed 's/armv7/arm/g; s/armhf/arm/g')
     local rootfs_filename="debian-${DEBIAN_RELEASE}-${debian_arch}-pd-${DEBIAN_VERSION}.tar.xz"
     local rootfs_url="${PROOT_MIRROR}/${DEBIAN_VERSION}/${rootfs_filename}"
     
@@ -486,7 +468,15 @@ install_debian() {
     fi
     
     echo "[*] Extracting rootfs..."
-    $ROOT_SU "tar -xpf ./rootfs.tar.xz --numeric-owner -C $base"
+        # Fallback: try tar auto-detection (may not work on all systems)
+    $ROOT_SU "busybox tar -xpf ./rootfs.tar.xz --numeric-owner --strip-components=1 -C $base" 2>/dev/null || {
+      echo "[!] xz decompression not available."
+      echo "[!] Install xz-utils in Termux: pkg install xz-utils"
+      echo "[!] Then try again: bash $0 --install debian"
+      $ROOT_SU "rm -rf $base"
+      rm -f ./rootfs.tar.xz
+      exit 1
+    }
     rm -f ./rootfs.tar.xz
     
     echo "[*] Configuring DNS..."
@@ -504,14 +494,7 @@ install_debian() {
     chroot_exec "$base" "apt-get update"
     
     echo "[*] Installing essential packages..."
-    chroot_exec "$base" "DEBIAN_FRONTEND=noninteractive apt-get install -y bash zsh sudo openssh-client wget nano vim git curl locales"
-    
-    echo "[*] Configuring locales..."
-    chroot_exec "$base" "locale-gen en_US.UTF-8"
-    chroot_exec "$base" "update-locale LANG=en_US.UTF-8"
-    
-    # Unmount before configure_user (will be remounted when starting)
-    cleanup_mounts "$base"
+    chroot_exec "$base" "DEBIAN_FRONTEND=noninteractive apt-get install -y bash zsh sudo openssh-client wget nano vim git curl"
     
     configure_user "$base" "debian"
     configure_zsh "$base"
@@ -524,6 +507,7 @@ Release: $DEBIAN_VERSION
 Architecture: $debian_arch
 Installed: \$(date '+%Y-%m-%d %H:%M:%S')
 EOF"
+    cleanup_mounts "$base"
     
     echo ""
     echo "[✓] Debian ${DEBIAN_RELEASE} installed successfully!"
@@ -568,14 +552,33 @@ install_archlinux() {
     fi
     
     echo "[*] Extracting rootfs..."
-    $ROOT_SU "tar -xpf ./rootfs.tar.xz --numeric-owner -C $base"
+        # Fallback: try tar auto-detection (may not work on all systems)
+    $ROOT_SU "busybox tar -xpf ./rootfs.tar.xz --numeric-owner --strip-components=1 -C $base" 2>/dev/null || {
+      echo "[!] xz decompression not available."
+      echo "[!] Install xz-utils in Termux: pkg install xz-utils"
+      echo "[!] Then try again: bash $0 --install archlinux"
+      $ROOT_SU "rm -rf $base"
+      rm -f ./rootfs.tar.xz
+      exit 1
+    }
     rm -f ./rootfs.tar.xz
     
     echo "[*] Configuring DNS..."
     chroot_exec "$base" "echo 'nameserver 8.8.8.8' > /etc/resolv.conf"
     chroot_exec "$base" "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
     
+    echo "[*] Mounting essential filesystems for package installation..."
+    $ROOT_SU "mount -t proc proc $base/proc 2>/dev/null || true"
+    $ROOT_SU "mount --rbind /sys $base/sys 2>/dev/null || true"
+    $ROOT_SU "mount --rbind /dev $base/dev 2>/dev/null || true"
+    $ROOT_SU "mount -t devpts devpts $base/dev/pts 2>/dev/null || true"
+    
     echo "[*] Initializing pacman keyring..."
+    mkdir -p $base/var/cache/pacman/pkg
+    $ROOT_SU "mount -t tmpfs tmpfs $base/var/cache/pacman/pkg"
+    chroot_exec "$base" "chmod 755 /var/cache /var/cache/pacman /var/cache/pacman/pkg"
+
+
     chroot_exec "$base" "pacman-key --init"
     chroot_exec "$base" "pacman-key --populate archlinux"
     
@@ -595,6 +598,7 @@ Version: $ARCH_VERSION
 Architecture: $arch_arch
 Installed: \$(date '+%Y-%m-%d %H:%M:%S')
 EOF"
+    cleanup_mounts "$base"
     
     echo ""
     echo "[✓] ArchLinux installed successfully!"
@@ -764,15 +768,19 @@ start_chroot() {
     trap "cleanup_mounts $base" EXIT
     
     # Fix nosuid on /data so sudo/su works inside chroot
-    # echo "[*] Enabling suid on /data for sudo/su support..."
+    echo "[*] Enabling suid on /data for sudo/su support..."
     $ROOT_SU "mount -o remount,dev,suid /data 2>/dev/null || true"
     
     # Mount filesystems
     mount_filesystems "$base"
     
     print_banner "Starting ${distro^} Linux"
+    echo "  User: $USER_NAME"
+    echo "  Workspace: /mnt/workspace"
+    echo "  SD Card: /mnt/sdcard"
+    echo "  sudo/su: ✓ Enabled"
+    echo ""
     
-    # trap '' INT
     $ROOT_SU "chroot $base /usr/bin/env -i \
 HOME=/home/$USER_NAME \
 USER=$USER_NAME \
@@ -780,7 +788,6 @@ SHELL=/bin/zsh \
 TERM=$TERM \
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 su - $USER_NAME"
-    # trap - INT
 }
 
 # ---------------------------
@@ -894,9 +901,12 @@ show_help() {
     echo "  --help                  Show this help message"
     echo ""
     echo "Requirements:"
-    echo "  - Rooted Android device (Magisk/KernelSU recommended)"
-    echo "  - Termux with root access (install 'tsu': pkg install tsu)"
+    echo "  - Rooted Android device (Magisk recommended)"
     echo "  - Internet connection for installation"
+    echo "  - For Debian/ArchLinux: pkg install xz-utils (in Termux)"
+    echo ""
+    echo "Note: Script automatically elevates privileges using 'su'"
+    echo "      No need to run with sudo or install additional tools!"
     echo ""
     echo "Features:"
     echo "  - 4 distributions: Alpine, Ubuntu, Debian, ArchLinux"
