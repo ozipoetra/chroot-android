@@ -39,11 +39,11 @@ print_message() {
 SCRIPT_VERSION="6.0.4"
 
 # Alpine versions
-ALPINE_VERSION="3.21.3"
-ALPINE_BRANCH="v3.21"
+ALPINE_VERSION="3.23.3"
+ALPINE_BRANCH="v3.23"
 
 # Ubuntu versions (use full version number from cdimage)
-UBUNTU_VERSION="24.04.1"  # Check https://cdimage.ubuntu.com/ubuntu-base/releases/
+UBUNTU_VERSION="24.04.3"  # Check https://cdimage.ubuntu.com/ubuntu-base/releases/
 UBUNTU_CODENAME="noble"   # noble=24.04, jammy=22.04, focal=20.04
 
 # Debian versions (from proot-distro)
@@ -574,9 +574,7 @@ install_archlinux() {
     $ROOT_SU "mount -t devpts devpts $base/dev/pts 2>/dev/null || true"
     
     echo "[*] Initializing pacman keyring..."
-    mkdir -p $base/var/cache/pacman/pkg
-    $ROOT_SU "mount -t tmpfs tmpfs $base/var/cache/pacman/pkg"
-    chroot_exec "$base" "chmod 755 /var/cache /var/cache/pacman /var/cache/pacman/pkg"
+    $ROOT_SU "mkdir -p $base/var/cache/pacman/pkg"
 
 
     chroot_exec "$base" "pacman-key --init"
